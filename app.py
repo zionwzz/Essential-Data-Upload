@@ -1,8 +1,7 @@
 from flask import Flask, render_template_string, request, send_file
-from io import StringIO
+from io import BytesIO
 import pandas as pd
 from boxsdk import Client, OAuth2
-import os
 
 app = Flask(__name__)
 
@@ -39,14 +38,14 @@ def fetch_and_process_csv(client, shared_folder_id, patient_no):
     combined_data = []
     for file in csv_files:
         content = file.content().decode('utf-8')
-        df = pd.read_csv(StringIO(content))
+        df = pd.read_csv(BytesIO(file.content()))  # Convert to DataFrame
         combined_data.append(df)
 
     final_df = pd.concat(combined_data, ignore_index=True)
 
-    # Convert DataFrame to CSV in memory
-    output = StringIO()
-    final_df.to_csv(output, index=False)
+    # Convert DataFrame to a binary CSV file in memory
+    output = BytesIO()
+    final_df.to_csv(output, index=False, encoding='utf-8')
     output.seek(0)
 
     return output, None
