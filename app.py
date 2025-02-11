@@ -1,13 +1,10 @@
 from flask import Flask, render_template_string, request, send_file
-from flask_ngrok import run_with_ngrok
-from boxsdk import Client, OAuth2
-import pandas as pd
-import re
 from io import StringIO
+import pandas as pd
+from boxsdk import Client, OAuth2
 import os
 
 app = Flask(__name__)
-run_with_ngrok(app)  # Enables ngrok for Colab
 
 # Function to authenticate with Box
 def authenticate_box_client(client_id, client_secret, developer_token):
@@ -47,11 +44,12 @@ def fetch_and_process_csv(client, shared_folder_id, patient_no):
 
     final_df = pd.concat(combined_data, ignore_index=True)
 
-    # Save the CSV file
-    csv_filename = "/content/generated_patient_data.csv"
-    final_df.to_csv(csv_filename, index=False)
-    
-    return csv_filename, None
+    # Convert DataFrame to CSV in memory
+    output = StringIO()
+    final_df.to_csv(output, index=False)
+    output.seek(0)
+
+    return output, None
 
 # Web Interface
 @app.route('/', methods=['GET', 'POST'])
@@ -101,15 +99,11 @@ def home():
             <label for="patient_no">Patient Number:</label>
             <input type="text" name="patient_no" required>
 
-            <button type="submit">Generate CSV</button>
+            <button type="submit">Generate & Download CSV</button>
         </form>
 
         {% if error %}
             <p style="color: red;">{{ error }}</p>
-        {% endif %}
-
-        {% if download_link %}
-            <p><a href="{{ download_link }}" download>Click here to download the CSV</a></p>
         {% endif %}
     </body>
     </html>
@@ -124,22 +118,22 @@ def home():
 
         try:
             client = authenticate_box_client(client_id, client_secret, developer_token)
-            csv_filename, error = fetch_and_process_csv(client, shared_folder_id, patient_no)
-            
+            csv_file, error = fetch_and_process_csv(client, shared_folder_id, patient_no)
+
             if error:
                 return render_template_string(html_template, error=error)
-            
-            download_link = "/download"
-            return render_template_string(html_template, download_link=download_link)
+
+            return send_file(
+                csv_file,
+                mimetype='text/csv',
+                as_attachment=True,
+                download_name=f"patient_{patient_no}_data.csv"
+            )
 
         except Exception as e:
             return render_template_string(html_template, error=str(e))
 
     return render_template_string(html_template)
 
-@app.route('/download')
-def download_file():
-    return send_file("/content/generated_patient_data.csv", as_attachment=True)
-
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
