@@ -7,152 +7,95 @@ from boxsdk import Client, OAuth2
 
 app = Flask(__name__)
 
-TEMPLATE_CSV_URL = "https://raw.githubusercontent.com/zionwzz/Essential-Data-Upload/refs/heads/main/ESSENTIALMiamiBaselineSurvey_ImportTemplate_2025-01-16.csv"
+UPLOAD_FOLDER = "static"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-def load_template_csv():
-    response = requests.get(TEMPLATE_CSV_URL)
-    if response.status_code == 200:
-        return pd.read_csv(BytesIO(response.content))
-    else:
-        raise Exception("Failed to load template CSV.")
+CSV_FILE_PATH = os.path.join(UPLOAD_FOLDER, "ESSENTIALMiamiBaselineSurvey_ImportTemplate.csv")
 
 def authenticate_box_client(client_id, client_secret, developer_token):
-    auth = OAuth2(client_id=client_id, client_secret=client_secret, access_token=developer_token)
+    auth = OAuth2(client_id=client_id, client_secret=client_secret,
+                  access_token=developer_token)
     return Client(auth)
 
 def list_folders(client, folder_id):
     folder = client.get_shared_item(folder_id)
-    folders = [(item.id, item.name) for item in folder.get_items() if item.type == 'folder']
-    return folders
+    print(f"Contents of folder '{folder.name}':")
+    return [(item.id, item.name) for item in folder.get_items() if item.type == 'folder']
 
-def navigate_to_folder(folders, code):
+def match_patient_folder(folders, patient_no):
     for folder_id, folder_name in folders:
-        if code in folder_name:
-            print(f"Navigating to folder: {folder_name} (ID: {folder_id})")
-            return client.folder(folder_id).get()
-    print(f"No folder found containing code '{code}'.")
-    return None
+        if patient_no in folder_name:
+            print(f"Matched folder: {folder_name} (ID: {folder_id})")
+            return folder_id, folder_name
+    print(f"No folder found matching patient_no '{patient_no}'.")
+    return None, None
 
-def fetch_csv_files(folder):
-    print(f"Fetching CSV files from folder: {folder.name}")
-    all_csv_files = []
+def navigate_and_fetch_files(client, folders, patient_no, file_keywords):
+    folder_id, folder_name = match_patient_folder(folders, patient_no)
+    if folder_id:
+        folder = client.folder(folder_id).get()
+        files_dict = {}
 
-    for item in folder.get_items():
-        if item.type == 'file' and item.name.endswith('.csv') and item.name.startswith('SIReport'):
-            print(f"Found CSV file: {item.name}")
-            all_csv_files.append(item)
+        for keyword in file_keywords:
+            matched_files = [item for item in folder.get_items() if item.type == 'file' and keyword in item.name]
+            files_dict[keyword] = matched_files
+            print(f"Found {len(matched_files)} files containing '{keyword}' in folder '{folder_name}'.")
 
-    return all_csv_files
+        return files_dict, folder_name
 
-def combine_sireport_csv_files(files):
+    return {}, None
+
+def fetch_and_combine_csv(files, keyword=None):
     combined_data = []
-
     for file in files:
         print(f"Downloading and processing file: {file.name}")
         content = file.content().decode('utf-8')
-        df = pd.read_csv(StringIO(content))
+
+        try:
+            if "fitbit_export" in file.name:
+                df = pd.read_csv(StringIO(content), sep=";")
+            else:
+                df = pd.read_csv(StringIO(content), sep=",")
+        except Exception as e:
+            print(f"Error reading {file.name}: {e}")
+            continue  # Skip files that fail
+
+        if keyword and keyword not in file.name:
+            continue
+
         combined_data.append(df)
 
-    combined_df = pd.concat(combined_data, ignore_index=True)
-    return combined_df
+    return pd.concat(combined_data, ignore_index=True) if combined_data else pd.DataFrame()
 
-def fetch_fitbit_export_file(folder):
-    print(f"Accessing shared folder: {folder.name}")
-
-    for item in folder.get_items():
-        if item.type == 'file' and item.name.startswith('fitbit_export') and item.name.endswith('.csv'):
-            print(f"Found file: {item.name}")
-            return item
-
-    print("No file starting with 'fitbit_export' was found.")
-    return None
-
-def read_fitbit_export_file(file):
-    print(f"Reading file: {file.name}")
-    content = file.content()
-
-    df = pd.read_csv(StringIO(content.decode('utf-8')), sep=";")
-    return df
-
-def extract_activities_section(df):
-    start_index = df[df['Body'] == 'Activities'].index[0]
-    end_index = df[df['Body'] == 'Sleep'].index[0]
-
-    activities_section = df.iloc[start_index + 1:end_index]
-    return activities_section
-
-def extract_sleep_section(df):
-    start_index = df[df['Body'] == 'Sleep'].index[0]
-    end_index = df[df['Body'].str.startswith('Food Log', na=False)].index[0]
-
-    sleep_section = df.iloc[start_index + 1:end_index]
-    return sleep_section
-
-def process_activities_section(df):
+def extract_section(df, start_keyword, end_keyword_prefix):
     try:
-        activities_section = extract_activities_section(df)
+        start_index = df[df['Body'] == start_keyword].index[0] + 1
+        end_index_candidates = df[df['Body'].str.startswith(end_keyword_prefix, na=False)].index
+        end_index = end_index_candidates[0] if not end_index_candidates.empty else len(df)
+        return df.iloc[start_index:end_index]
+    except IndexError:
+        print(f"Section {start_keyword} not found.")
+        return pd.DataFrame()
 
-        processed_rows = []
+def process_section(df, start_keyword, end_keyword_prefix, sort_by=None):
+    section = extract_section(df, start_keyword, end_keyword_prefix)
+    if section.empty:
+        return section
 
-        column_names = activities_section['Body'].iloc[0].split(",")
+    column_names = section.iloc[0]['Body'].split(",")
+    processed_data = [[row.split(",", 1)[0]] + re.findall(r'"(.*?)"', row) for row in section['Body'].iloc[1:]]
 
-        for row in activities_section['Body'].iloc[1:]:
-            date_part = row.split(",", 1)[0]
-            rest_part = re.findall(r'"(.*?)"', row)
-            processed_row = [date_part] + rest_part
-            processed_rows.append(processed_row)
+    processed_df = pd.DataFrame(processed_data, columns=column_names)
+    if sort_by:
+        processed_df = processed_df.sort_values(by=sort_by)
 
-        processed_df = pd.DataFrame(processed_rows, columns=column_names)
-        output_csv_cleaned = "processed_activities_cleaned.csv"
-        processed_df.to_csv(output_csv_cleaned, index=False)
+    return processed_df
 
-        return processed_df
-
-    except ValueError as e:
-        print(e)
-        return None, None
-
-def process_sleep_section(df):
-    try:
-        sleep_section = extract_sleep_section(df)
-
-        processed_rows = []
-
-        column_names = sleep_section['Body'].iloc[0].split(",")
-
-        for row in sleep_section['Body'].iloc[1:]:
-            date_part = row.split(",", 1)[0]
-            rest_part = re.findall(r'"(.*?)"', row)
-            processed_row = [date_part] + rest_part
-            processed_rows.append(processed_row)
-
-        processed_df = pd.DataFrame(processed_rows, columns=column_names)
-        processed_df = processed_df.sort_values(by='Start Time')
-        processed_df['complete'] = 2
-
-        return processed_df
-
-    except ValueError as e:
-        print(e)
-        return None
-
-def fetch_txt_files(folder):
-    print(f"Accessing shared folder: {folder.name}")
-    all_txt_files = []
-
-    for item in folder.get_items():
-        if item.type == 'file' and item.name.endswith('.txt'):
-            print(f"Found text file: {item.name}")
-            all_txt_files.append(item)
-        elif item.type == 'folder':
-            print("Note: Nested folders are not supported via shared links.")
-    return all_txt_files
-
-def combine_txt_files_as_string(file_list):
+def fetch_and_process_txt(files):
     combined_content = ""
     is_first_file = True
 
-    for file_item in file_list:
+    for file_item in files:
         print(f"Processing file: {file_item.name}")
         file_content = file_item.content()
         content = file_content.decode('utf-8')
@@ -167,164 +110,72 @@ def combine_txt_files_as_string(file_list):
     return combined_content
 
 def process_combined_data(combined_content, columns_to_average):
-    df = pd.read_csv(StringIO(combined_content), sep=";", index_col = False)
-    average_df = df.groupby("Date")[columns_to_average].mean().reset_index()
-    average_df['complete'] = 2
-    return average_df
+    df = pd.read_csv(StringIO(combined_content), sep=";", index_col=False)
+    df.reset_index(drop=True, inplace=True)
+    return df.groupby("Date")[columns_to_average].mean().reset_index()
 
-def filter_files_by_name(files, keyword):
-    return [file for file in files if keyword in file.name]
-
-def append_data_to_template(empty_template, start_index, data, instrument_name, instance_start, constant_col_index=None, constant_col_value=None):
-
-    na_rows = pd.DataFrame(index=range(len(data)), columns=empty_template.columns)
-    empty_template = pd.concat([empty_template, na_rows], ignore_index=True)
-
-    start_row = len(empty_template) - len(data)
+def append_data_to_template(template, start_index, data, instrument_name, instance_start, constant_col_index=None, constant_col_value=None):
+    empty_rows = pd.DataFrame(index=range(len(data)), columns=template.columns)
+    template = pd.concat([template, empty_rows], ignore_index=True)
+    start_row = len(template) - len(data)
 
     for col_idx, col_name in enumerate(data.columns):
-        empty_template.iloc[start_row:, start_index + col_idx] = data[col_name]
+        template.iloc[start_row:, start_index + col_idx] = data[col_name]
 
-    empty_template.iloc[start_row:, 1] = instrument_name
-    empty_template.iloc[start_row:, 2] = range(instance_start, instance_start + len(data))
+    template.iloc[start_row:, 1] = instrument_name
+    template.iloc[start_row:, 2] = range(instance_start, instance_start + len(data))
     if constant_col_index is not None and constant_col_value is not None:
-        empty_template.iloc[start_row:, constant_col_index] = constant_col_value
+        template.iloc[start_row:, constant_col_index] = constant_col_value
 
-    return empty_template
+    return template
 
-def process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id):
-    CLIENT_ID = client_id
-    CLIENT_SECRET = client_secret
-    DEVELOPER_TOKEN = developer_token
-    SHARED_FOLDER_ID = shared_folder_id
-    
+def process_data():
     client = authenticate_box_client(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN)
     folders = list_folders(client, SHARED_FOLDER_ID)
-    selected_folder = navigate_to_folder(folders, patient_id)
-    
-    if not selected_folder:
-        return {"error": "No folder found with the specified code."}
+    files_dict, folder_name = navigate_and_fetch_files(client, folders, PATIENT_NO, ["SIReport", "fitbit_export", "AirVisual_values"])
 
-    all_txt_files = fetch_txt_files(selected_folder)
-    filtered_files = filter_files_by_name(all_txt_files, "AirVisual_values")
-    
-    if filtered_files:
-        combined_content = combine_txt_files_as_string(filtered_files)
-        columns_to_average = [
-            "PM2_5(ug/m3)", "AQI(US)", "PM1(ug/m3)",
-            "PM10(ug/m3)", "Temperature(F)", "Humidity(%RH)", "CO2(ppm)"
-        ]
-        average_df = process_combined_data(combined_content, columns_to_average)
-    else:
-        average_df = None
-    
-    sireport_files = fetch_csv_files(selected_folder)
-    combined_df = combine_sireport_csv_files(sireport_files) if sireport_files else None
-    
-    fitbit_file = fetch_fitbit_export_file(selected_folder)
-    fitbit_df = read_fitbit_export_file(fitbit_file) if fitbit_file else None
-    
-    fa = process_activities_section(fitbit_df) if fitbit_df is not None else None
-    fs = process_sleep_section(fitbit_df) if fitbit_df is not None else None
-    
-    template = load_template_csv()
+    template = pd.read_csv(CSV_FILE_PATH)
+
     empty_template = pd.DataFrame(columns=template.columns)
-    
-    if combined_df is not None:
+
+    # Process Data
+    combined_df = fetch_and_combine_csv(files_dict.get("SIReport", []))
+    if not combined_df.empty:
+        combined_df['complete'] = 2
         start_index = template.columns.get_loc('patient_id')
-        empty_template = pd.DataFrame(columns=template.columns, index=range(len(combined_df)))
-        for col_idx, col_name in enumerate(combined_df.columns):
-            empty_template.iloc[:, start_index + col_idx] = combined_df[col_name]
-        empty_template.iloc[:, 1] = 'sleepimage_ring'
-        empty_template.iloc[:, 2] = range(1, len(combined_df) + 1)
-    
-    if fa is not None and fs is not None:
+        empty_template = append_data_to_template(empty_template, start_index, combined_df, 'sleepimage_ring', 1)
+
+    fitbit_df = fetch_and_combine_csv(files_dict.get("fitbit_export", []))
+    fa = process_section(fitbit_df, "Activities", "Sleep")
+    fs = process_section(fitbit_df, "Sleep", "Food Log", sort_by="Start Time")
+
+    if not fa.empty and not fs.empty:
         start_index = template.columns.get_loc('date_fb')
         empty_template = append_data_to_template(empty_template, start_index, fa, 'fitbit', 1, constant_col_index=613, constant_col_value=2)
+
         start_index = template.columns.get_loc('start_time_fitbit_dc5002')
-        empty_template = append_data_to_template(empty_template, start_index, fs, 'fitbit_f530f4', 1)
-    
+        empty_template = append_data_to_template(empty_template, start_index, fs, 'fitbit_f530f4', 1, constant_col_index=623, constant_col_value=2)
+
+    combined_content = fetch_and_process_txt(files_dict.get("AirVisual_values", []))
+    columns_to_average = ["PM2_5(ug/m3)", "AQI(US)", "PM1(ug/m3)", "PM10(ug/m3)", "Temperature(F)", "Humidity(%RH)", "CO2(ppm)"]
+    average_df = process_combined_data(combined_content, columns_to_average) if combined_content else None
+
     if average_df is not None:
         start_index = template.columns.get_loc('date_iq')
-        empty_template = append_data_to_template(empty_template, start_index, average_df, 'iq_air', 1)
-    
-    empty_template.iloc[:,0] = re.search(r'\d+_+[A-Z]+_+[A-Z]+', selected_folder.name).group(0)
-    output_filename = 'processed_data.csv'
-    empty_template.iloc[:,:-1].to_csv(output_filename, index=False)
-    
-    return output_filename
+        empty_template = append_data_to_template(empty_template, start_index, average_df, 'iq_air', 1, constant_col_index=632, constant_col_value=2)
 
-# Web Interface
-@app.route('/', methods=['GET', 'POST'])
+    output_file = os.path.join(UPLOAD_FOLDER, f"ESSENTIALMiamiBaselineSurvey_ImportTemplate_{folder_name}.csv")
+    empty_template.iloc[:, :-1].to_csv(output_file, index=False)
+    return output_file
+
+@app.route('/')
 def home():
-    html_template = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CSV Generator</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                text-align: center;
-                margin: 50px;
-            }
-            form {
-                display: inline-block;
-                text-align: left;
-            }
-            input, button {
-                width: 100%;
-                padding: 10px;
-                margin: 5px 0;
-                font-size: 16px;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Generate Patient CSV</h1>
-        <p>Enter Box API credentials and patient number to generate the CSV file.</p>
+    return render_template("index.html")
 
-        <form method="POST">
-            <label for="client_id">Client ID:</label>
-            <input type="text" name="client_id" required>
-
-            <label for="client_secret">Client Secret:</label>
-            <input type="text" name="client_secret" required>
-
-            <label for="developer_token">Developer Token:</label>
-            <input type="text" name="developer_token" required>
-
-            <label for="shared_folder_id">Shared Folder ID:</label>
-            <input type="text" name="shared_folder_id" required>
-
-            <label for="patient_id">Patient Number:</label>
-            <input type="text" name="patient_id" required>
-
-            <button type="submit">Generate & Download CSV</button>
-        </form>
-
-        {% if error %}
-            <p style="color: red;">{{ error }}</p>
-        {% endif %}
-    </body>
-    </html>
-    """
-
-    if request.method == 'POST':
-        client_id = request.form['client_id']
-        client_secret = request.form['client_secret']
-        developer_token = request.form['developer_token']
-        shared_folder_id = request.form['shared_folder_id']
-        patient_id = request.form['patient_id']
-
-        output_filename = process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id)
-
-    if os.path.exists(output_filename):
-        return send_file(output_filename, as_attachment=True)
-    else:
-        return "Error: File could not be generated."
+@app.route('/download')
+def download_file():
+    output_file = process_data()
+    return send_file(output_file, as_attachment=True)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
