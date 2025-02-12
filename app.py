@@ -129,7 +129,7 @@ def append_data_to_template(template, start_index, data, instrument_name, instan
 
     return template
 
-def process_data():
+def process_data(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN, SHARED_FOLDER_ID, PATIENT_NO):
     client = authenticate_box_client(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN)
     folders = list_folders(client, SHARED_FOLDER_ID)
     files_dict, folder_name = navigate_and_fetch_files(client, folders, PATIENT_NO, ["SIReport", "fitbit_export", "AirVisual_values"])
@@ -138,7 +138,6 @@ def process_data():
 
     empty_template = pd.DataFrame(columns=template.columns)
 
-    # Process Data
     combined_df = fetch_and_combine_csv(files_dict.get("SIReport", []))
     if not combined_df.empty:
         combined_df['complete'] = 2
@@ -171,20 +170,17 @@ def process_data():
 @app.route('/', methods=['GET', 'POST'])
 def home():
     if request.method == 'POST':
-        # Get form inputs
         client_id = request.form['client_id']
         client_secret = request.form['client_secret']
         developer_token = request.form['developer_token']
         shared_folder_id = request.form['shared_folder_id']
         patient_no = request.form['patient_no']
 
-        # Process data with user input
         output_file, folder_name = process_data(client_id, client_secret, developer_token, shared_folder_id, patient_no)
         return render_template("index.html", file_ready=True, folder_name=folder_name)
 
     return render_template("index.html", file_ready=False)
 
-# 🔹 Route to Download Processed File
 @app.route('/download/<folder_name>')
 def download_file(folder_name):
     file_path = os.path.join(UPLOAD_FOLDER, f"ESSENTIALMiamiBaselineSurvey_ImportTemplate_{folder_name}.csv")
