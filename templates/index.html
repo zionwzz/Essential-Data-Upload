@@ -3,30 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Download Data File</title>
+    <title>Download Processed Data</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             text-align: center;
             margin: 50px;
         }
-        .download-btn {
-            display: inline-block;
+        input {
+            width: 300px;
+            padding: 10px;
+            margin: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .btn {
             padding: 10px 20px;
             font-size: 18px;
             color: white;
             background: #007BFF;
             text-decoration: none;
             border-radius: 5px;
+            cursor: pointer;
+            border: none;
         }
-        .download-btn:hover {
+        .btn:hover {
             background: #0056b3;
         }
     </style>
 </head>
 <body>
     <h1>Download Processed Data</h1>
-    <p>Click below to download the final CSV file.</p>
-    <a href="{{ url_for('download_file') }}" class="download-btn">Download CSV</a>
+
+    <form method="POST">
+        <input type="text" name="client_id" placeholder="Client ID" required><br>
+        <input type="text" name="client_secret" placeholder="Client Secret" required><br>
+        <input type="text" name="developer_token" placeholder="Developer Token" required><br>
+        <input type="text" name="shared_folder_id" placeholder="Shared Folder ID" required><br>
+        <input type="text" name="patient_no" placeholder="Patient Number" required><br>
+        <button type="submit" class="btn">Process Data</button>
+    </form>
+
+    {% if file_ready %}
+        <h3>File is ready!</h3>
+        <a href="{{ url_for('download_file', folder_name=folder_name) }}" class="btn">Download CSV</a>
+    {% endif %}
 </body>
 </html>
