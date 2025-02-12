@@ -168,14 +168,27 @@ def process_data():
     empty_template.iloc[:, :-1].to_csv(output_file, index=False)
     return output_file
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def home():
-    return render_template("index.html")
+    if request.method == 'POST':
+        # Get form inputs
+        client_id = request.form['client_id']
+        client_secret = request.form['client_secret']
+        developer_token = request.form['developer_token']
+        shared_folder_id = request.form['shared_folder_id']
+        patient_no = request.form['patient_no']
 
-@app.route('/download')
-def download_file():
-    output_file = process_data()
-    return send_file(output_file, as_attachment=True)
+        # Process data with user input
+        output_file, folder_name = process_data(client_id, client_secret, developer_token, shared_folder_id, patient_no)
+        return render_template("index.html", file_ready=True, folder_name=folder_name)
+
+    return render_template("index.html", file_ready=False)
+
+# 🔹 Route to Download Processed File
+@app.route('/download/<folder_name>')
+def download_file(folder_name):
+    file_path = os.path.join(UPLOAD_FOLDER, f"ESSENTIALMiamiBaselineSurvey_ImportTemplate_{folder_name}.csv")
+    return send_file(file_path, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
