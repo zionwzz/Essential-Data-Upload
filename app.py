@@ -2,7 +2,6 @@ from flask import Flask, render_template_string, request, send_file
 from io import BytesIO, StringIO
 import pandas as pd
 import re
-import requests
 from boxsdk import Client, OAuth2
 
 app = Flask(__name__)
@@ -18,17 +17,11 @@ def load_template_csv():
 
 def authenticate_box_client(client_id, client_secret, developer_token):
     auth = OAuth2(client_id=client_id, client_secret=client_secret, access_token=developer_token)
-    client = Client(auth)
-    return client
+    return Client(auth)
 
 def list_folders(client, folder_id):
     folder = client.get_shared_item(folder_id)
-    print(f"Contents of folder '{folder.name}':")
-
-    folders = []
-    for item in folder.get_items():
-        if item.type == 'folder':
-            folders.append((item.id, item.name))
+    folders = [(item.id, item.name) for item in folder.get_items() if item.type == 'folder']
     return folders
 
 def navigate_to_folder(folders, code):
@@ -198,15 +191,15 @@ def append_data_to_template(empty_template, start_index, data, instrument_name, 
 
     return empty_template
 
-def process_patient_data(patient_no):
-    CLIENT_ID = "your_client_id"
-    CLIENT_SECRET = "your_client_secret"
-    DEVELOPER_TOKEN = "your_developer_token"
-    SHARED_FOLDER_ID = "your_shared_folder_id"
+def process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id):
+    CLIENT_ID = client_id
+    CLIENT_SECRET = client_secret
+    DEVELOPER_TOKEN = developer_token
+    SHARED_FOLDER_ID = shared_folder_id
     
     client = authenticate_box_client(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN)
     folders = list_folders(client, SHARED_FOLDER_ID)
-    selected_folder = navigate_to_folder(folders, patient_no)
+    selected_folder = navigate_to_folder(folders, patient_id)
     
     if not selected_folder:
         return {"error": "No folder found with the specified code."}
@@ -260,50 +253,72 @@ def process_patient_data(patient_no):
     
     return output_filename
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Download Processed Data</title>
-</head>
-<body>
-    <h2>Enter Details</h2>
-    <form action="/download" method="post">
-        <label>CLIENT ID:</label>
-        <input type="text" name="client_id" required><br><br>
+# Web Interface
+@app.route('/', methods=['GET', 'POST'])
+def home():
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CSV Generator</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                margin: 50px;
+            }
+            form {
+                display: inline-block;
+                text-align: left;
+            }
+            input, button {
+                width: 100%;
+                padding: 10px;
+                margin: 5px 0;
+                font-size: 16px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Generate Patient CSV</h1>
+        <p>Enter Box API credentials and patient number to generate the CSV file.</p>
 
-        <label>CLIENT SECRET:</label>
-        <input type="text" name="client_secret" required><br><br>
+        <form method="POST">
+            <label for="client_id">Client ID:</label>
+            <input type="text" name="client_id" required>
 
-        <label>DEVELOPER TOKEN:</label>
-        <input type="text" name="developer_token" required><br><br>
+            <label for="client_secret">Client Secret:</label>
+            <input type="text" name="client_secret" required>
 
-        <label>SHARED FOLDER ID:</label>
-        <input type="text" name="shared_folder_id" required><br><br>
+            <label for="developer_token">Developer Token:</label>
+            <input type="text" name="developer_token" required>
 
-        <label>Patient ID:</label>
-        <input type="text" name="patient_id" required><br><br>
+            <label for="shared_folder_id">Shared Folder ID:</label>
+            <input type="text" name="shared_folder_id" required>
 
-        <button type="submit">Generate & Download</button>
-    </form>
-</body>
-</html>
-"""
+            <label for="patient_id">Patient Number:</label>
+            <input type="text" name="patient_id" required>
 
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
+            <button type="submit">Generate & Download CSV</button>
+        </form>
 
-@app.route('/download', methods=['POST'])
-def download_file():
-    client_id = request.form['client_id']
-    client_secret = request.form['client_secret']
-    developer_token = request.form['developer_token']
-    shared_folder_id = request.form['shared_folder_id']
-    patient_id = request.form['patient_id']
+        {% if error %}
+            <p style="color: red;">{{ error }}</p>
+        {% endif %}
+    </body>
+    </html>
+    """
 
-    # Generate processed data
-    output_filename = process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id)
+    if request.method == 'POST':
+        client_id = request.form['client_id']
+        client_secret = request.form['client_secret']
+        developer_token = request.form['developer_token']
+        shared_folder_id = request.form['shared_folder_id']
+        patient_id = request.form['patient_id']
+
+        output_filename = process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id)
 
     if os.path.exists(output_filename):
         return send_file(output_filename, as_attachment=True)
