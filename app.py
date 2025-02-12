@@ -260,15 +260,55 @@ def process_patient_data(patient_no):
     
     return output_filename
 
-@app.route("/process", methods=["POST"])
-def process_request():
-    data = request.json
-    patient_no = data.get("patient_no")
-    if not patient_no:
-        return jsonify({"error": "Missing patient_no parameter"}), 400
-    
-    output_file = process_patient_data(patient_no)
-    return send_file(output_file, as_attachment=True)
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Download Processed Data</title>
+</head>
+<body>
+    <h2>Enter Details</h2>
+    <form action="/download" method="post">
+        <label>CLIENT ID:</label>
+        <input type="text" name="client_id" required><br><br>
 
-if __name__ == "__main__":
+        <label>CLIENT SECRET:</label>
+        <input type="text" name="client_secret" required><br><br>
+
+        <label>DEVELOPER TOKEN:</label>
+        <input type="text" name="developer_token" required><br><br>
+
+        <label>SHARED FOLDER ID:</label>
+        <input type="text" name="shared_folder_id" required><br><br>
+
+        <label>Patient ID:</label>
+        <input type="text" name="patient_id" required><br><br>
+
+        <button type="submit">Generate & Download</button>
+    </form>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/download', methods=['POST'])
+def download_file():
+    client_id = request.form['client_id']
+    client_secret = request.form['client_secret']
+    developer_token = request.form['developer_token']
+    shared_folder_id = request.form['shared_folder_id']
+    patient_id = request.form['patient_id']
+
+    # Generate processed data
+    output_filename = process_patient_data(patient_id, client_id, client_secret, developer_token, shared_folder_id)
+
+    if os.path.exists(output_filename):
+        return send_file(output_filename, as_attachment=True)
+    else:
+        return "Error: File could not be generated."
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
