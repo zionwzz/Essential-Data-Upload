@@ -10,7 +10,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "static"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-CSV_FILE_PATH = os.path.join(UPLOAD_FOLDER, "ESSENTIALMiamiBaselineSurvey_ImportTemplate.csv")
+CSV_FILE_PATH = os.path.join(UPLOAD_FOLDER, "ESSENTIALMiamiBaselineSurvey_ImportTemplate_2025-01-16 5.03.06 PM.csv")
 
 def authenticate_box_client(client_id, client_secret, developer_token):
     auth = OAuth2(client_id=client_id, client_secret=client_secret,
