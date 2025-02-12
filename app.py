@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, send_file
+from flask import Flask, render_template, request, send_file
 from io import BytesIO, StringIO
 import pandas as pd
 import re
