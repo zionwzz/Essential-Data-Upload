@@ -7,21 +7,14 @@ from boxsdk import Client, OAuth2
 
 app = Flask(__name__)
 
-# 🔹 Replace with your GitHub or Google Drive raw CSV link
-TEMPLATE_CSV_URL = "https://raw.githubusercontent.com/zionwzz/Essential-Data-Upload/refs/heads/main/ESSENTIALMiamiBaselineSurvey_ImportTemplate_2025-01-16.csv?token=GHSAT0AAAAAAC6ZNGX77SZE356YQX3THJDWZ5MA23A"
+TEMPLATE_CSV_URL = "https://raw.githubusercontent.com/zionwzz/Essential-Data-Upload/refs/heads/main/ESSENTIALMiamiBaselineSurvey_ImportTemplate_2025-01-16.csv"
 
-# Load template CSV
 def load_template_csv():
     response = requests.get(TEMPLATE_CSV_URL)
     if response.status_code == 200:
         return pd.read_csv(BytesIO(response.content))
     else:
         raise Exception("Failed to load template CSV.")
-
-from boxsdk import Client, OAuth2
-import re
-import pandas as pd
-from io import StringIO
 
 def authenticate_box_client(client_id, client_secret, developer_token):
     auth = OAuth2(client_id=client_id, client_secret=client_secret, access_token=developer_token)
@@ -240,6 +233,7 @@ def process_patient_data(patient_no):
     fa = process_activities_section(fitbit_df) if fitbit_df is not None else None
     fs = process_sleep_section(fitbit_df) if fitbit_df is not None else None
     
+    template = load_template_csv()
     empty_template = pd.DataFrame(columns=template.columns)
     
     if combined_df is not None:
