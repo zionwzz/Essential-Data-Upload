@@ -148,7 +148,7 @@ def process_data(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN, SHARED_FOLDER_ID, PA
     fa = process_section(fitbit_df, "Activities", "Sleep")
     fs = process_section(fitbit_df, "Sleep", "Food Log", sort_by="Start Time")
 
-    if not fa.empty and not fs.empty:
+    if not fa.empty or not fs.empty:
         start_index = template.columns.get_loc('date_fb')
         empty_template = append_data_to_template(empty_template, start_index, fa, 'fitbit', 1, constant_col_index=613, constant_col_value=2)
 
