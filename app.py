@@ -164,6 +164,7 @@ def process_data(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN, SHARED_FOLDER_ID, PA
         empty_template = append_data_to_template(empty_template, start_index, average_df, 'iq_air', 1, constant_col_index=632, constant_col_value=2)
 
     output_file = os.path.join(UPLOAD_FOLDER, f"ESSENTIALMiamiBaselineSurvey_ImportTemplate_{folder_name}.csv")
+    empty_template.iloc[:, 0] = folder_name
     empty_template.iloc[:, :-1].to_csv(output_file, index=False)
     return output_file, folder_name
 
