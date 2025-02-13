@@ -165,7 +165,7 @@ def process_data(CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN, SHARED_FOLDER_ID, PA
 
     output_file = os.path.join(UPLOAD_FOLDER, f"ESSENTIALMiamiBaselineSurvey_ImportTemplate_{folder_name}.csv")
     empty_template.iloc[:, :-1].to_csv(output_file, index=False)
-    return output_file
+    return output_file, folder_name
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
